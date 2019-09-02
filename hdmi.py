@@ -82,7 +82,7 @@ def ss(f, sentences):
     for s in sentences:
         for n in s.nodes():
             if n != 0:
-                kids = depgraph.dependents_of(s, n)
+                kids = list(depgraph.dependents_of(s, n))
                 if len(kids) >= 2:
                     for s1, s2 in itertools.combinations(kids, 2):
                         yield f(s, s1), f(s, s2)
@@ -326,9 +326,10 @@ hdmi = mi_factory(hd)
 
 def hdmi_topologies_with_permutation_tests():
     d = {}
-    c = cond.get_pos
+    pos = cond.get_pos
+    wordform = cond.get_word
     num_samples = 500
-    def mi_pt(f, g, sentences):
+    def mi_pt(f, g, c, sentences):
         return permutation_test(
             mi_of_observations,
             list(f(c, sentences)),
@@ -338,22 +339,28 @@ def hdmi_topologies_with_permutation_tests():
 
     #for lang, corpus in [['en', corpora.ud_corpora['en']]]:
     for lang, corpus in corpora.ud_corpora.items():
+        print("Analyzing language %s" % lang, file=sys.stderr)
         sentences = list(corpus.sentences(fix_content_head=False))
         d[lang] = {
-            'hdmi': hdmi(c, sentences),
-            'gdmi': gdmi(c, sentences),
-            'ssmi': ssmi(c, sentences),
-            'hd_gd_pt': mi_pt(hd, gd, sentences),
-            'hd_ss_pt': mi_pt(hd, ss, sentences),
-            'gd_ss_pt': mi_pt(gd, ss, sentences)
+            'hdmi_pos': hdmi(pos, sentences),
+            'gdmi_pos': gdmi(pos, sentences),
+            'ssmi_pos': ssmi(pos, sentences),
+            'hd_gd_pos_pt': mi_pt(hd, gd, pos, sentences),
+            'hd_ss_pos_pt': mi_pt(hd, ss, pos, sentences),
+            'gd_ss_pos_pt': mi_pt(gd, ss, pos, sentences),
+            'hdmi_w': hdmi(wordform, sentences),
+            'gdmi_w': gdmi(wordform, sentences),
+            'ssmi_w': ssmi(wordform, sentences),
+            'hd_gd_w_pt': mi_pt(hd, gd, wordform, sentences),
+            'hd_ss_w_pt': mi_pt(hd, ss, wordform, sentences),
+            'gd_ss_w_pt': mi_pt(gd, ss, wordform, sentences),           
         }
     df = pd.DataFrame(d).T
     df['lang'] = df.index
     return df
 
-def skip_mi_sweep():
+def skip_mi_sweep(c=cond.get_pos):
     max_k = 15
-    c = cond.get_pos
     def gen():
         for lang, corpus in corpora.ud_corpora.items():
             print(lang, file=sys.stderr)
