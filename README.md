@@ -73,6 +73,14 @@ Average pmi values of pos tags at different distances in the UD corpora.
 To replicate these numbers, do in Python:
 ```python
 import hdmi
-hdmi.skip_pmi_sweep()
+hdmi.skip_mi_sweep()
 ```
+
+To get the numbers for wordforms:
+```python
+import cliqs.conditioning as cond
+import hdmi
+hdmi.skip_mi_sweep(cond.get_word)
+```
+
 
