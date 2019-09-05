@@ -183,18 +183,18 @@ def skip_pmis(f, sentences, k, by_deptype=False):
         for n in s.nodes()[1:]:
             w = f(s, n)
             marginal[w] += 1
-        for n1, n2 in skipgrams(s.nodes()[1:], k):
+        for n1, n2 in skipgrams(sorted(s.nodes())[1:], k):
             w1 = f(s, n1)
             w2 = f(s, n2)
             joint[w1, w2] += 1
-    log_Z_joint = log(sum(joint.values()))
+    log_Z_joint = safelog(sum(joint.values()))
     log_Z_marginal = log(sum(marginal.values()))
     pmi_Z = log_Z_joint - 2*log_Z_marginal
     def pmi(w1, w2):
         return (
-            log(joint[w1, w2])
-            - log(marginal[w1])
-            - log(marginal[w2])
+            safelog(joint[w1, w2])
+            - safelog(marginal[w1])
+            - safelog(marginal[w2])
             - pmi_Z
         )
     if by_deptype:
@@ -204,7 +204,7 @@ def skip_pmis(f, sentences, k, by_deptype=False):
     baselinepmi = []
     for s in sentences:
         edges = set(s.edges())
-        for n1, n2 in skipgrams(s.nodes()[1:], k):
+        for n1, n2 in skipgrams(sorted(s.nodes())[1:], k):
             w1 = f(s, n1)
             w2 = f(s, n2)
             the_pmi = pmi(w1, w2)
@@ -226,6 +226,12 @@ def safemean(xs):
         return mean(xs)
     except ValueError:
         return 0
+
+def safelog(x):
+    try:
+        return log(x)
+    except ValueError:
+        return -float('inf')
 
 def skip_pmi(f, sentences, k, num_samples=500):
     hdpmi, baselinepmi = skip_pmis(f, sentences, k, by_deptype=False)
@@ -405,7 +411,7 @@ def skip_pmi_by_deptype():
 def hdmi_sweep():
     d = {}
     for lang, corpus in corpora.ud_corpora.items():
-        sentences = list(corpus.sentences(fix_content_head=False))
+        sentences = list(corpus.sentences(fix_content_head=True))
         d[lang] = {
             'hd_mi': hdmi(cond.get_pos, sentences),
             'hd_n': count(hd(cond.nothing, sentences)),
