@@ -46,7 +46,7 @@ The script takes two arguments, `match_code` and `get_code`. `match_code` tells 
 The resulting file `arcs_01_01` contains joint counts of two words in the specified dependency relationship.
 Now generate the vocabulary file for the frequency cutoff:
 ```
-$ cat arcs_01-01 | sed "s/^.* //g" | sort | uniqsum.sh > vocab
+$ cat arcs_01-01 | sed "s/^.* //g" | sort -rnk 2 | uniqsum.sh > vocab
 ```
 Then use the vocab file to calculate MI with a frequency cutoff:
 ```
