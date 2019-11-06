@@ -1,3 +1,5 @@
+# Seems to work, but could be optimized using tensordot/bmm instead of naive multiplications
+
 import argparse
 parser = argparse.ArgumentParser()
 
@@ -87,6 +89,29 @@ for rule, prob in rules:
 #    unary_productions[j+NONTERMINALS][j+NONTERMINALS] = 0
 
 
+matrixLeft = torch.FloatTensor([[0 for _ in range(NONTERMINALS+TERMINALS)] for _ in range(NONTERMINALS+TERMINALS)]) # traces the LEFT edge
+for rule, prob in rules:
+  left, right = rule
+  matrixLeft[stoi[left]][stoi[right[0]]] -= prob
+
+
+for i in range(NONTERMINALS+TERMINALS):
+    matrixLeft[i][i] += 1
+print(matrixLeft)
+print(matrixLeft.sum(dim=1))
+invertedLeft = torch.inverse(matrixLeft)
+print(invertedLeft)
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -100,6 +125,7 @@ HEIGHTS=0
 sequenceLength = inputs.size()[0]
 chart = torch.zeros(inputs.size()[0], inputs.size()[0], 0+1, args.BATCHSIZE, (TERMINALS+NONTERMINALS))
 chart.fill_(float("-Inf"))
+
 binary_productionsHere = binary_productions
 for length in range(sequenceLength):
    for start in range(sequenceLength): # first word
@@ -126,8 +152,8 @@ for length in range(sequenceLength):
           for intermediate in range(start+1, end+1): # start of the second constituent
              assert intermediate <= end
              height = 0
-             logprobsFromLeft = chart[start, intermediate-start-1, height, :, :]
-             logprobsFromRight = chart[intermediate, end-intermediate, height, :, :]
+             logprobsFromLeft = chart[start, intermediate-start-1, 0, :, :]
+             logprobsFromRight = chart[intermediate, end-intermediate, 0, :, :]
              rightMax = logprobsFromRight.max()
              if float(rightMax) == float("-inf"):
                 continue
@@ -138,17 +164,55 @@ for length in range(sequenceLength):
                 continue
              fullProd = prodWithRight * torch.exp(logprobsFromLeft.unsqueeze(1).expand(-1, NONTERMINALS, -1) - leftMax)
              fullProd = fullProd.sum(dim=2)
-             results[height].append(torch.log(fullProd) + rightMax + leftMax)
-             assert results[height][-1].max() < -1e-5, results[height][-1] # sometimes an assertion error is triggered here
-          height = 0
-          if len(results[height]) == 0:
+             results[0].append(torch.log(fullProd) + rightMax + leftMax)
+             assert results[0][-1].max() < -1e-5, results[0][-1] # sometimes an assertion error is triggered here
+          if len(results[0]) == 0:
              continue
-          resultsForHeight = torch.stack(results[height])
+          resultsForHeight = torch.stack(results[0])
           resMax = resultsForHeight.max()
           if float(resMax) == float("-inf"):
                continue
-          chart[start, end-start, height, :, :NONTERMINALS] = torch.log(torch.exp(resultsForHeight - resMax).sum(dim=0)) + resMax
-          assert chart[start, end-start, height, :, :NONTERMINALS].max() < -1e-5
+          chart[start, end-start, 0, :, :NONTERMINALS] = torch.log(torch.exp(resultsForHeight - resMax).sum(dim=0)) + resMax
+          assert chart[start, end-start, 0, :, :NONTERMINALS].max() < -1e-5
+   
+# first fill the prefix chart at the last element
+print(chart[sequenceLength-1, 0, 0, :, :])
+chartPrefix = torch.zeros(inputs.size()[0], 0+1, args.BATCHSIZE, (TERMINALS+NONTERMINALS))
+chartPrefix.fill_(float("-Inf"))
+
+chartPrefix[sequenceLength-1, 0, :, :] = torch.log((invertedLeft.unsqueeze(0).expand(args.BATCHSIZE, -1, -1) * torch.exp(chart[sequenceLength-1, 0, 0, :, :]).unsqueeze(1).expand(-1, NONTERMINALS+TERMINALS, -1)).sum(dim=2))
+print( chartPrefix[sequenceLength-1, 0, :, :])
+for start in range(sequenceLength-2, -1, -1):
+   results = [[] for _ in range(1)]
+   for intermediateStart in range(start+1, sequenceLength):
+      logprobsFromLeft = chart[start, intermediateStart-start-1, 0, :, :]
+      logprobsFromRight = chartPrefix[intermediateStart, 0, :, :]
+      rightMax = logprobsFromRight.max()
+      if float(rightMax) == float("-inf"):
+         continue
+      prodWithRight = torch.exp(binary_productionsHere.unsqueeze(0).expand(args.BATCHSIZE, -1, -1, -1)) * torch.exp(logprobsFromRight.unsqueeze(1).unsqueeze(1).expand(-1, NONTERMINALS, TERMINALS+NONTERMINALS, -1) - rightMax)
+      prodWithRight = prodWithRight.sum(dim=3)
+      leftMax = logprobsFromLeft.max()
+      if float(leftMax) == float("-inf"):
+         continue
+      fullProd = prodWithRight * torch.exp(logprobsFromLeft.unsqueeze(1).expand(-1, NONTERMINALS, -1) - leftMax)
+      fullProd = fullProd.sum(dim=2)
+      results[0].append(torch.log(fullProd) + rightMax + leftMax)
+      assert results[0][-1].max() < -1e-5, results[0][-1] # sometimes an assertion error is triggered here
+   if len(results[0]) == 0:
+      continue
+   resultsForHeight = torch.stack(results[0])
+   resMax = resultsForHeight.max()
+   if float(resMax) == float("-inf"):
+        continue
+   preliminaryResult = torch.log(torch.exp(resultsForHeight - resMax).sum(dim=0)) + resMax
+
+   print(invertedLeft.size(), preliminaryResult.size())
+   chartPrefix[start, 0, :, :NONTERMINALS] = torch.log((invertedLeft[:NONTERMINALS, :NONTERMINALS].unsqueeze(0).expand(args.BATCHSIZE, -1, -1) * torch.exp(preliminaryResult).unsqueeze(1).expand(-1, NONTERMINALS, -1)).sum(dim=2))
+   assert chartPrefix[start,  0, :, :NONTERMINALS].max() < -1e-5
+
+print("Prefix probability")
+print(chartPrefix[0, 0, :, stoi["ROOT"]])
 overallProbabilities = torch.zeros(args.BATCHSIZE)
 covered = torch.zeros(args.BATCHSIZE).byte()
 CHART_END = chart[0, :, 0, :, stoi["ROOT"]]
