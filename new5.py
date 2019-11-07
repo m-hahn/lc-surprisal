@@ -1,8 +1,4 @@
-# Seems to work, but could be optimized using tensordot/bmm instead of naive multiplications
-
-# This one (new4.py) samples multiple corruptions, and performs the full inference for each
-
-# Currently the problem is that the pruning method has low precision (lets through many bad prefixes), and that the current heuristic leads yto very long hypothesis that slow down inference. A regular expression would be a good solution.
+# Based on new4.py, but does simple toy center embedding
 
 import argparse
 parser = argparse.ArgumentParser()
@@ -41,44 +37,45 @@ def is_close(x, y, tol):
 ################################
 # NOTE: The parameters are different from those used in the original paper.
 
-NOISE_RATE = 0.1
+NOISE_RATE = 0.5
 
 p_mod = 0.1
 p_rc = 0.3
 p_src = 0.8 # 1e-5 # 0.0 for German, 0.8 for English
+
+p_rec = 0.3
 ################################
 
 # unary rules are OK for terminals
 rules = [
     (("ROOT", ("S", ".")), 1),
-    (('S', ('NP', 'V')), 1),
-    (('NP', ('N',)), 1 - p_mod),
-    (('NP', ('N', 'RC')), p_mod * p_rc),
-    (('NP', ('N', 'PP')), p_mod * (1 - p_rc)),
-    (('PP', ('P', 'NP')), 1),
-    (('RC', ('C', 'S')), 1 - p_src),
-    (('RC', ('C', 'VNP')), p_src),
-    (('VNP', ('V', 'NP')), 1)
+    (('S', ('A1', 'S1')), 0.33 * p_rec),
+    (('S', ('A2', 'S2')), 0.33 * p_rec),
+    (('S', ('A3', 'S3')), 0.33 * p_rec),
+#    (('S', ('A4', 'S4')), 0.2 * p_rec),
+ #   (('S', ('A5', 'S5')), 0.2 * p_rec),
+    (('S', ('A1', 'B1')), 0.33 * (1-p_rec)),
+    (('S', ('A2', 'B2')), 0.33 * (1-p_rec)),
+    (('S', ('A3', 'B3')), 0.33 * (1-p_rec)),
+#    (('S', ('A4', 'B4')), 0.2 * (1-p_rec)),
+ #   (('S', ('A5', 'B5')), 0.2 * (1-p_rec)),
+    (('S1', ('S', 'B1')), 1),
+    (('S2', ('S', 'B2')), 1),
+    (('S3', ('S', 'B3')), 1),
+  #  (('S4', ('S', 'B4')), 1),
+   # (('S5', ('S', 'B5')), 1),
 ]
 
 validBigrams = set()
-validBigrams.add(("N", "V"))
-validBigrams.add(("N", "C"))
-validBigrams.add(("N", "P"))
-
-validBigrams.add(("V", "N"))
-validBigrams.add(("V", "V"))
-
-validBigrams.add(("C", "V"))
-validBigrams.add(("C", "N"))
-
-validBigrams.add(("P", "N"))
+for i in range(1,6):
+  for j in range(1, 6):
+      validBigrams.add(("A"+str(i), "A"+str(j)))
+      validBigrams.add(("B"+str(i), "B"+str(j)))
+      validBigrams.add(("A"+str(i), "B"+str(j)))
 
 badTrigrams = set()
-badTrigrams.add(("N", "V", "N"))
-#badTrigrams.add(("V", "N", "V"))
 
-terminals = set(["N", "C", "V", "P"])
+terminals = set(["A"+str(i) for i in range(1,6)] + ["B"+str(i) for i in range(1,6)])
 symbols = set()
 nonterminals = set()
 for rule, prob in rules:
@@ -129,10 +126,10 @@ for rule, prob in rules:
 
 for i in range(NONTERMINALS+TERMINALS):
     matrixLeft[i][i] += 1
-print(matrixLeft)
-print(matrixLeft.sum(dim=1))
+#print(matrixLeft)
+#print(matrixLeft.sum(dim=1))
 invertedLeft = torch.inverse(matrixLeft)
-print(invertedLeft)
+#print(invertedLeft)
 
 
 
@@ -147,44 +144,66 @@ print(invertedLeft)
 
 
 
-sentence = ["N", "C", "N", "C", "N", "V", "V"] #, "V"] # , "."
+sentence = ["A1", "A2", "A3", "B3"] #, "V"] # , "."
 #sentence = ["N", "C", "N", "V", "V"] # , "."
 
 
 def corrupt(s):
    return [x for x in s if random.random() > NOISE_RATE]
 
-print(corrupt(sentence))
-print(corrupt(sentence))
-print(corrupt(sentence))
-print(corrupt(sentence))
-print(corrupt(sentence))
-print(corrupt(sentence))
-print(corrupt(sentence))
-print(corrupt(sentence))
-
+#print(corrupt(sentence))
+#print(corrupt(sentence))
+#print(corrupt(sentence))
+#print(corrupt(sentence))
+#print(corrupt(sentence))
+#print(corrupt(sentence))
+#print(corrupt(sentence))
+#print(corrupt(sentence))
+#
+def updateStack(stack, symbol):
+   if symbol.startswith("A"):
+      stack.append(symbol)
+   else:
+      del stack[-1]
 
 # a proposal distribution that 
 def inverseCorrupt(s):
    while True:
       sa = []
+      stack = []
       loglikelihood = 0
+      fail=False
+
       for i in range(len(s)+1):   
          while random.random() < 0.3 or (len(sa) > 0 and i < len(s) and (sa[-1], s[i]) not in validBigrams):
+#            if len(sa) > 0:
+ #              print("INTERPOSING SYMBOL", (sa[-1], s[i:]))
             loglikelihood += log(0.1)
-            nextSymbol = random.choice(terminals)
-            while (len(sa) > 0 and (sa[-1], nextSymbol) not in validBigrams) or (len(sa) == 0 and nextSymbol in [".", "C", "P", "V"]) or (len(sa) > 1 and (tuple(sa[-2:])+(nextSymbol,)) in badTrigrams):
+            nextSymbol = random.choice(terminals) #  or (len(sa) == 0 and nextSymbol in [".", "C", "P", "V"])
+            if len(sa) > 0 and len(stack) == 0:
+               return tuple(sa), 0         
+            while nextSymbol == "." or (len(sa) > 0 and (sa[-1], nextSymbol) not in validBigrams) or (len(sa) > 1 and (tuple(sa[-2:])+(nextSymbol,)) in badTrigrams) or (i < len(s) and (nextSymbol.startswith("B") or nextSymbol == ".") and s[i].startswith("A")) or (nextSymbol.startswith("B") and (len(stack) == 0 or nextSymbol[1] != stack[-1][1])):
+ #               if len(sa) > 0:
+#                   print("Trying next symbol", nextSymbol, (sa[-1], nextSymbol, sa[-5:]))
                 nextSymbol = random.choice(terminals)
             sa.append(nextSymbol)
+            updateStack(stack, nextSymbol)
          loglikelihood += log(0.9)
          if i < len(s):
             sa.append(s[i])
-      fail=False
-      if sa[0] in [".", "C", "P", "V"]:
-        fail=True
-      vs = len([x for x in sa if x == "V"])
-      ns = len([x for x in sa if x == "N"])
-      if vs > ns:
+            if len(stack) == 0 and s[i].startswith("B"):
+               fail=True
+               break
+            updateStack(stack, s[i])
+
+    #  print("Trying", sa)
+#      if sa[0] in [".", "C", "P", "V"]:
+ #       fail=True
+      as_ = len([x for x in sa if x.startswith("A")])
+      bs_ = len([x for x in sa if x.startswith("B")])
+      if len(sa) == 0:
+        fail = True
+      if bs_ > as_:
 #        print(sa)
         fail=True
       for j in range(len(sa)-1):
@@ -211,11 +230,12 @@ for corruptionInd in range(100):
     while len(proposals) < args.BATCHSIZE:
       sa, loglik = inverseCorrupt(corrupted)
       if sa not in proposalsSet:
+         #print(sa)
          proposals.append((list(sa), loglik))
          proposalsSet.add(sa)
 #         print(len(proposals))
      
-    print(["".join(x) for x in proposalsSet])
+    print(["-".join(x) for x in proposalsSet])
     s = [x[0] for x in proposals]
     probs = torch.FloatTensor([x[1] for x in proposals])
     lengths = torch.LongTensor([len(x) for x in s])
@@ -422,29 +442,23 @@ for corruptionInd in range(100):
     
     
     prefixProb = (parse([x[0] for x in proposals]))
-    updatedProbEOS = (parse([x[0]+["."] for x in proposals]))
-    updatedProbV = (parse([x[0]+["V"] for x in proposals]))
-    
+    updatedProbEOS = (parse([x[0]+["B2"] for x in proposals]))
+    updatedProbV = (parse([x[0]+["B1"] for x in proposals]))
+    print(prefixProb)    
     print("WELLFORMED PREFIXES", ((prefixProb > float("-inf")).float().sum()))
-    #print(updatedProb)
-    #surprisal = (prefixProb - updatedProb)
-    #print(torch.exp(-surprisal))
-    #print(torch.exp(logImportanceWeights))
-  #  print(torch.exp(logPCorruptedSource))
- #   print(torch.exp(logPCorruptedSource).sum())
     
     logNormalizationConstant = torch.log(torch.sum(torch.exp(prefixProb + logPCorruptedSource)))
-#    print(logNormalizationConstant)
     
     marginalVerbProbability = torch.exp(logPCorruptedSource + updatedProbV -  logNormalizationConstant).sum()
     print("Marginal verb prob", marginalVerbProbability)
-    
     
     marginalEOSProbability = torch.exp(logPCorruptedSource + updatedProbEOS -  logNormalizationConstant).sum()
     print("Marginal EOS prob", marginalEOSProbability)
     surprisalsV.append(log(1e-10+float(marginalVerbProbability)))
     surprisalsEOS.append(log(1e-10+float(marginalEOSProbability)))
-    print("SURP VERB", surprisalsV)
-    print("SURP EOS", surprisalsEOS)
+ #   print("SURP VERB", surprisalsV)
+#    print("SURP EOS", surprisalsEOS)
     print("SURP Avg VERB", -sum([surprisalsV[i] for i in range(len(surprisalsV))])/len(surprisalsV))
     print("SURP Avg EOS", -sum([surprisalsEOS[i] for i in range(len(surprisalsV))])/len(surprisalsV))
+#    quit()
+
