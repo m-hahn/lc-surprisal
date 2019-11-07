@@ -4,7 +4,7 @@ import argparse
 parser = argparse.ArgumentParser()
 
 
-parser.add_argument("--BATCHSIZE", type=int, default=1000)
+parser.add_argument("--BATCHSIZE", type=int, default=2)
 args=parser.parse_args()
 print(args)
 
@@ -105,6 +105,8 @@ for rule, prob in rules:
 matrixLeft = torch.FloatTensor([[0 for _ in range(NONTERMINALS+TERMINALS)] for _ in range(NONTERMINALS+TERMINALS)]) # traces the LEFT edge
 for rule, prob in rules:
   left, right = rule
+  if len(right) == 1:
+    continue
   matrixLeft[stoi[left]][stoi[right[0]]] -= prob
 
 
@@ -114,7 +116,6 @@ print(matrixLeft)
 print(matrixLeft.sum(dim=1))
 invertedLeft = torch.inverse(matrixLeft)
 print(invertedLeft)
-
 
 
 
@@ -234,7 +235,18 @@ def parse(sentences):
             if length == 0: # a single word
      #          print("==============")
      #          print(inputs[start,:])
-               ((chart[start, length, 0, : , inputs[start,:]])) = 0
+               for i in range(args.BATCHSIZE):
+                  ((chart[start, length, 0, i , inputs[start,i]])) = 0
+#               print(inputs[start,:])
+#               print(((chart[start, length, 0, : , :])))
+#               print("Penultimate")
+#               print(((chart[start, length, 0, -2 , :])))
+#               print("Ultimate")
+#               print(((chart[start, length, 0, -1 , :])))
+#
+#               if start == sequenceLength-1:
+#                  quit()
+            
      #          print(((chart[start, length, HEIGHTS, : , inputs[start,:]])))
      #          print(((chart[start, length, HEIGHTS])))
      #
@@ -245,6 +257,8 @@ def parse(sentences):
      #          print((torch.exp(unary_productions.unsqueeze(0).expand(args.BATCHSIZE, -1, -1)) * torch.exp(((chart[start, length, HEIGHTS, : , :])).unsqueeze(1).expand(-1, TERMINALS+NONTERMINALS, -1))).sum(dim=2))
      
                ((chart[start, length, 0, : , :])) = torch.log(torch.exp(((chart[start, length, 0, : , :]))) + (torch.exp(unary_productions.unsqueeze(0).expand(args.BATCHSIZE, -1, -1)) * torch.exp(((chart[start, length, 0, : , :])).unsqueeze(1).expand(-1, TERMINALS+NONTERMINALS, -1))).sum(dim=2))
+
+               assert ((chart[start, length, 0, : , :])).max() < 0.1, ((chart[start, length, 0, : , :]))
      #          print(((chart[start, length, HEIGHTS, : , :])))
             else:
                results = [[] for _ in range(1)]
@@ -278,9 +292,33 @@ def parse(sentences):
      print(chart[sequenceLength-1, 0, 0, :, :])
      chartPrefix = torch.zeros(inputs.size()[0], 0+1, args.BATCHSIZE, (TERMINALS+NONTERMINALS))
      chartPrefix.fill_(float("-Inf"))
-     
+
+
+
+     print(chart[sequenceLength-1, 0, 0, :, :]) 
+     assert chart[sequenceLength-1, 0, 0, :, :].max() < 0.1, chart[sequenceLength-1, 0, 0, :, :] 
+   
+     print(invertedLeft)
+     print(invertedLeft.size(), chart[sequenceLength-1, 0, 0].size())
+
+
+     print(invertedLeft.unsqueeze(0).expand(args.BATCHSIZE, -1, -1).size(), torch.exp(chart[sequenceLength-1, 0, 0, :, :]).unsqueeze(1).expand(-1, NONTERMINALS+TERMINALS, -1).size())
+     print((invertedLeft.unsqueeze(0).expand(args.BATCHSIZE, -1, -1) * torch.exp(chart[sequenceLength-1, 0, 0, :, :]).unsqueeze(1).expand(-1, NONTERMINALS+TERMINALS, -1)).size())
+     print(chart[sequenceLength-1, 0, 0, :, :])
+#     quit()
      chartPrefix[sequenceLength-1, 0, :, :] = torch.log((invertedLeft.unsqueeze(0).expand(args.BATCHSIZE, -1, -1) * torch.exp(chart[sequenceLength-1, 0, 0, :, :]).unsqueeze(1).expand(-1, NONTERMINALS+TERMINALS, -1)).sum(dim=2))
-     print( chartPrefix[sequenceLength-1, 0, :, :])
+     print(invertedLeft)
+     print("OFFENDING CHART LINE")
+     print(chart[sequenceLength-1, 0, 0, -1])
+     print(itos)
+     assert chartPrefix[sequenceLength-1, 0, -1, :NONTERMINALS].max() < 0.1, chartPrefix[sequenceLength-1, 0, -1, :NONTERMINALS]
+     assert chartPrefix[sequenceLength-1, 0, -2, :NONTERMINALS].max() < 0.1, chartPrefix[sequenceLength-1, 0, -2, :NONTERMINALS]
+
+     assert chartPrefix[sequenceLength-1, 0, :, :NONTERMINALS].max() < 0.1, chartPrefix[sequenceLength-1, 0, :, :NONTERMINALS]
+
+     assert chartPrefix[sequenceLength-1, 0, :, :].max() < 0.1, chartPrefix[sequenceLength-1, 0, :, :]
+#     print( chartPrefix[sequenceLength-1, 0, :, :])
+ #    quit()
      for start in range(sequenceLength-2, -1, -1):
         results = [[] for _ in range(1)]
         for intermediateStart in range(start+1, sequenceLength):
@@ -299,7 +337,7 @@ def parse(sentences):
            fullProd = fullProd.sum(dim=2)
            results[0].append(torch.log(fullProd) + rightMax + leftMax)
            print(torch.argmax(results[0][-1]), results[0][-1].size(), results[0][-1][-1][-1]) # TODO figure out what's going on here
-           assert results[0][-1].max() < -1e-5, results[0][-1] # sometimes an assertion error is triggered here
+           assert results[0][-1].max() < 1e-5, results[0][-1] # sometimes an assertion error is triggered here
         if len(results[0]) == 0:
            continue
         resultsForHeight = torch.stack(results[0])
@@ -310,25 +348,23 @@ def parse(sentences):
      
         print(invertedLeft.size(), preliminaryResult.size())
         chartPrefix[start, 0, :, :NONTERMINALS] = torch.log((invertedLeft[:NONTERMINALS, :NONTERMINALS].unsqueeze(0).expand(args.BATCHSIZE, -1, -1) * torch.exp(preliminaryResult).unsqueeze(1).expand(-1, NONTERMINALS, -1)).sum(dim=2))
-        assert chartPrefix[start,  0, :, :NONTERMINALS].max() < -1e-5
+        assert chartPrefix[start,  0, :, :NONTERMINALS].max() < 1e-5
      
      print(sentences[:5])
+     print(lengths)
      print("Prefix probability")
-     print(chartPrefix[0, 0, :, stoi["ROOT"]])
-     overallProbabilities = torch.zeros(args.BATCHSIZE)
-     covered = torch.zeros(args.BATCHSIZE).byte()
-     CHART_END = chart[0, :, 0, :, stoi["ROOT"]]
-     print(CHART_END)
-     for i in range(CHART_END.size()[0]-1, -1, -1):
-        coveredHere = (CHART_END[i] > float("-inf"))
-        toBeAdded = (coveredHere * (1-covered))
-        covered = covered + toBeAdded
-        overallProbabilities = torch.where(toBeAdded, CHART_END[i], overallProbabilities)
-    
+     print(chartPrefix[:, 0, :, stoi["ROOT"]])
+     return torch.FloatTensor([chartPrefix[maxLen-lengths[i], 0, i, stoi["ROOT"]] for i in range(args.BATCHSIZE)])
+   
 
 
-parse([x[0] for x in proposals])
-
+prefixProb = (parse([x[0] for x in proposals]))
+updatedProb = (parse([x[0]+["V"] for x in proposals]))
+print(prefixProb)
+print(updatedProb)
+surprisal = (prefixProb - updatedProb)
+print(torch.exp(-surprisal))
+print(torch.exp(logImportanceWeights))
 
 
 
