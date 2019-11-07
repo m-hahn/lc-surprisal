@@ -9,7 +9,7 @@ args=parser.parse_args()
 print(args)
 
 import random
-#random.seed(0)
+random.seed(0)
 
 from math import log
 
@@ -284,7 +284,7 @@ def parse(sentences):
      for start in range(sequenceLength-2, -1, -1):
         results = [[] for _ in range(1)]
         for intermediateStart in range(start+1, sequenceLength):
-           print(start, intermediateStart)
+           print(start, intermediateStart, start+1, sequenceLength)
            logprobsFromLeft = chart[start, intermediateStart-start-1, 0, :, :]
            logprobsFromRight = chartPrefix[intermediateStart, 0, :, :]
            rightMax = logprobsFromRight.max()
@@ -298,6 +298,7 @@ def parse(sentences):
            fullProd = prodWithRight * torch.exp(logprobsFromLeft.unsqueeze(1).expand(-1, NONTERMINALS, -1) - leftMax)
            fullProd = fullProd.sum(dim=2)
            results[0].append(torch.log(fullProd) + rightMax + leftMax)
+           print(torch.argmax(results[0][-1]), results[0][-1].size(), results[0][-1][-1][-1]) # TODO figure out what's going on here
            assert results[0][-1].max() < -1e-5, results[0][-1] # sometimes an assertion error is triggered here
         if len(results[0]) == 0:
            continue
